@@ -183,6 +183,18 @@ class TelegramAgent
       settings.embedPoster && payload.image ? 'sendPhoto' : 'sendMessage'
     }`;
 
+    // Custom topic routing by notification type (configured via env vars).
+    // Within the same supergroup, approved requests and available media are
+    // posted to dedicated topics; other types use the default thread.
+    const threadOverride =
+      type === Notification.MEDIA_APPROVED ||
+      type === Notification.MEDIA_AUTO_APPROVED
+        ? process.env.TELEGRAM_TOPIC_APPROVED
+        : type === Notification.MEDIA_AVAILABLE
+          ? process.env.TELEGRAM_TOPIC_AVAILABLE
+          : undefined;
+    const systemThreadId = threadOverride || settings.options.messageThreadId;
+
     // Send system notification
     if (
       payload.notifySystem &&
@@ -201,7 +213,7 @@ class TelegramAgent
         await axios.post(endpoint, {
           ...notificationPayload,
           chat_id: settings.options.chatId,
-          message_thread_id: settings.options.messageThreadId,
+          message_thread_id: systemThreadId,
           disable_notification: !!settings.options.sendSilently,
         } as TelegramMessagePayload | TelegramPhotoPayload);
       } catch (e) {
