@@ -57,6 +57,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            COMMIT_TAG=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ inputs.upstream_tag }}-custom-webhook
             ghcr.io/${{ github.repository }}:latest
