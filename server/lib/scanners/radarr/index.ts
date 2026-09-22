@@ -28,6 +28,8 @@ class RadarrScanner
   private scanned4kTmdbIds: Set<number> = new Set();
   private didScanStandard = false;
   private didScan4k = false;
+  private serverReturnedEmpty = false;
+  private server4kReturnedEmpty = false;
 
   constructor() {
     super('Radarr Scan', { bundleSize: 50 });
@@ -50,6 +52,8 @@ class RadarrScanner
     this.scanned4kTmdbIds.clear();
     this.didScanStandard = false;
     this.didScan4k = false;
+    this.serverReturnedEmpty = false;
+    this.server4kReturnedEmpty = false;
 
     try {
       this.servers = uniqWith(settings.radarr, (radarrA, radarrB) => {
@@ -82,6 +86,18 @@ class RadarrScanner
             this.didScanStandard = true;
           }
 
+          if (this.items.length === 0) {
+            if (server4k) {
+              this.server4kReturnedEmpty = true;
+            } else {
+              this.serverReturnedEmpty = true;
+            }
+            this.log(
+              `Radarr server ${server.name} returned no movies. Orphan cleanup for this profile type will be skipped.`,
+              'warn'
+            );
+          }
+
           await this.loop(this.processRadarrMovie.bind(this), { sessionId });
         } else {
           this.log(`Sync not enabled. Skipping Radarr server: ${server.name}`);
@@ -103,6 +119,13 @@ class RadarrScanner
         this.didScanStandard = false;
       }
       if (!all4kScanned) {
+        this.didScan4k = false;
+      }
+
+      if (this.serverReturnedEmpty) {
+        this.didScanStandard = false;
+      }
+      if (this.server4kReturnedEmpty) {
         this.didScan4k = false;
       }
 
@@ -141,18 +164,57 @@ class RadarrScanner
     }
   }
 
+  private async existsInAnyServer(
+    tmdbId: number,
+    is4k: boolean
+  ): Promise<boolean> {
+    const servers = this.servers.filter(
+      (server) =>
+        server.syncEnabled && (this.enable4kMovie && server.is4k) === is4k
+    );
+
+    for (const server of servers) {
+      try {
+        const api = new RadarrAPI({
+          apiKey: server.apiKey,
+          url: RadarrAPI.buildUrl(server, '/api/v3'),
+        });
+        const movies = await api.getLibraryMoviesByTmdbId(tmdbId);
+
+        if (movies.some((movie) => movie.tmdbId === tmdbId)) {
+          return true;
+        }
+      } catch (e) {
+        this.log(
+          `Could not confirm movie ${tmdbId} against Radarr server ${server.name}. Skipping cleanup for it.`,
+          'warn',
+          { errorMessage: e.message }
+        );
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   private async cleanupOrphanedMovies(): Promise<void> {
     const mediaRepository = getRepository(Media);
 
     if (this.didScanStandard) {
       const processingMovies = await mediaRepository.find({
         where: { mediaType: MediaType.MOVIE, status: MediaStatus.PROCESSING },
+        relations: { requests: true },
       });
 
       for (const media of processingMovies) {
         if (!this.scannedTmdbIds.has(media.tmdbId)) {
+          if (await this.existsInAnyServer(media.tmdbId, false)) {
+            continue;
+          }
+
           media.status = MediaStatus.UNKNOWN;
           await mediaRepository.save(media);
+          await this.declineOrphanedRequests(media, false);
           this.log(
             `Movie ${media.tmdbId} not found in any Radarr server. Status reset to UNKNOWN.`,
             'info'
@@ -172,12 +234,18 @@ class RadarrScanner
           mediaType: MediaType.MOVIE,
           status4k: MediaStatus.PROCESSING,
         },
+        relations: { requests: true },
       });
 
       for (const media of processing4kMovies) {
         if (!this.scanned4kTmdbIds.has(media.tmdbId)) {
+          if (await this.existsInAnyServer(media.tmdbId, true)) {
+            continue;
+          }
+
           media.status4k = MediaStatus.UNKNOWN;
           await mediaRepository.save(media);
+          await this.declineOrphanedRequests(media, true);
           this.log(
             `Movie ${media.tmdbId} not found in any 4K Radarr server. 4K status reset to UNKNOWN.`,
             'info'
