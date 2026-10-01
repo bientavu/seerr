@@ -143,7 +143,8 @@ class WebhookAgent
     return finalPayload;
   }
 
-  private buildPayload(type: Notification, payload: NotificationPayload) {
+  // protected (upstream: private) so WhatsappAgent can add its group routing on top.
+  protected buildPayload(type: Notification, payload: NotificationPayload) {
     const payloadString = Buffer.from(
       this.getSettings().options.jsonPayload,
       'base64'
@@ -228,25 +229,9 @@ class WebhookAgent
         });
       }
 
-      // Build the payload first
-      const finalPayload = this.buildPayload(type, payload);
-
-      // Group 1: Validated requests (BOTH manual and auto-approved)
-      if (
-        type === Notification.MEDIA_APPROVED ||
-        type === Notification.MEDIA_AUTO_APPROVED
-      ) {
-        finalPayload.number = process.env.WHATSAPP_GROUP_APPROVED;
-      }
-      // Group 2: Available requests
-      else if (type === Notification.MEDIA_AVAILABLE) {
-        finalPayload.number = process.env.WHATSAPP_GROUP_AVAILABLE;
-      }
-
-      // Send the modified payload
       await axios.post(
         webhookUrl,
-        finalPayload,
+        this.buildPayload(type, payload),
         Object.keys(headers).length > 0 ? { headers } : undefined
       );
 

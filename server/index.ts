@@ -17,6 +17,7 @@ import SlackAgent from '@server/lib/notifications/agents/slack';
 import TelegramAgent from '@server/lib/notifications/agents/telegram';
 import WebhookAgent from '@server/lib/notifications/agents/webhook';
 import WebPushAgent from '@server/lib/notifications/agents/webpush';
+import WhatsappAgent from '@server/lib/notifications/agents/whatsapp';
 import checkOverseerrMerge from '@server/lib/overseerrMerge';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
@@ -150,6 +151,9 @@ app
       new WebhookAgent(),
       new WebPushAgent(),
     ]);
+    // Custom (bientavu fork): env-configured WhatsApp webhook, see agents/whatsapp.ts.
+    // Separate call (registerAgents appends) so upstream edits to the list above merge.
+    notificationManager.registerAgents([new WhatsappAgent()]);
 
     const userRepository = getRepository(User);
     const totalUsers = await userRepository.count();

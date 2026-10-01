@@ -27,13 +27,19 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Fetch Official Tag and Merge
+        id: merge
         run: |
           git remote add upstream https://github.com/seerr-team/seerr.git
           # Fetch the specific tag typed in the UI
           git fetch upstream tag ${{ inputs.upstream_tag }}
 
-          # Merge release tag into branch
-          git merge ${{ inputs.upstream_tag }} --no-edit || echo "Merge conflict detected. Need to resolve manually."
+          # Merge release tag into branch. A conflict must FAIL the job: carrying on
+          # would push/tag the pre-merge code and publish it under the new version.
+          if ! git merge ${{ inputs.upstream_tag }} --no-edit; then
+            echo "::error::Merge conflict with ${{ inputs.upstream_tag }}. Resolve it locally on develop, push, then re-run."
+            git merge --abort
+            exit 1
+          fi
 
           # Push updated code to branch
           git push origin HEAD
@@ -41,6 +47,9 @@ jobs:
           # Create git tag and push it
           git tag ${{ inputs.upstream_tag }}-custom-webhook
           git push origin ${{ inputs.upstream_tag }}-custom-webhook
+
+          # The image must report the merged commit, not the pre-merge github.sha
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -58,7 +67,7 @@ jobs:
           context: .
           push: true
           build-args: |
-            COMMIT_TAG=${{ github.sha }}
+            COMMIT_TAG=${{ steps.merge.outputs.sha }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ inputs.upstream_tag }}-custom-webhook
             ghcr.io/${{ github.repository }}:latest
